@@ -5,6 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include "libretro.h"
+#include <alsa/asoundlib.h>
 
 #define load_sym(H, N)                                                  \
     (*(void **)&N) = dlsym(H, #N);                                      \
@@ -13,6 +14,8 @@
         fprintf(stderr, "failed to load symbol '#N': %s\n", dlerror()); \
         return 1;                                                       \
     }
+
+snd_pcm_t *pcm = NULL;
 
 bool set_environment(unsigned cmd, void *data)
 {
@@ -41,7 +44,25 @@ void set_audio_sample(int16_t left, int16_t right)
 
 size_t set_audio_sample_batch(const int16_t *data, size_t frames)
 {
+    if (!pcm)
+    {
+        return 0;
+    }
+
+    int n = snd_pcm_writei(pcm, data, frames);
+    if (n < 0)
+    {
+        snd_pcm_recover(pcm, n, 0);
     return 0;
+    }
+
+    return n;
+}
+
+void set_audio_sample(int16_t left, int16_t right)
+{
+    int16_t buf[2] = {left, right};
+    set_audio_sample_batch(buf, 1);
 }
 
 void set_input_poll(void)
@@ -160,19 +181,24 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // TODO
     struct retro_system_av_info av = {0};
     retro_get_system_av_info(&av);
 
-    // TODO load state
-    // char state_path[256];
-    // strncpy(state_path, game.path, 256);
-    // strcat(state_path, ".state");
+    // init sound
 
-    // FILE *state_file = fopen(state_path, "rb");
-    // if (state_file)
-    // {
-    // }
+    int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
+    if (err < 0)
+    {
+        fprintf(stderr, "failed to open playback device: %s", snd_strerror(err));
+        return 1;
+    }
+
+    err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16, SND_PCM_ACCESS_RW_INTERLEAVED, 2, av.timing.sample_rate, 1, 64 * 1000);
+    if (err < 0)
+    {
+        fprintf(stderr, "failed to configure playback device: %s", snd_strerror(err));
+        return 1;
+    }
 
     for (;;)
     {
