@@ -8,15 +8,17 @@
 #include <alsa/asoundlib.h>
 
 #define fatal(msg, ...)                  \
+    fprintf(stderr, "FATAL: ");          \
     fprintf(stderr, msg, ##__VA_ARGS__); \
+    fprintf(stderr, "\n");               \
     shutdown();                          \
     exit(1);
 
-#define load_sym(H, N)                                        \
-    (*(void **)&N) = dlsym(H, #N);                            \
-    if (!N)                                                   \
-    {                                                         \
-        fatal("failed to load symbol '#N': %s\n", dlerror()); \
+#define load_sym(H, N)                                      \
+    (*(void **)&N) = dlsym(H, #N);                          \
+    if (!N)                                                 \
+    {                                                       \
+        fatal("failed to load symbol '#N': %s", dlerror()); \
     }
 
 // #define DEBUG 1
@@ -77,11 +79,12 @@ void set_video_refresh(const void *data, unsigned width, unsigned height, size_t
     init_pair(COLOR_GREEN, COLOR_GREEN, COLOR_GREEN);
     init_pair(COLOR_BLUE, COLOR_BLUE, COLOR_BLUE);
 
-    int skip = 1;
-    for (int i = 0; i < width * height; i += skip)
+    int step = 2;
+    int skip = 0;
+    for (int i = 0; i < width * height; i += step)
     {
-        unsigned w = (i % width) / skip;
-        unsigned h = (i / width) / skip;
+        unsigned w = (i - skip) % width / step;
+        unsigned h = (i - skip) / width / step;
 
         // ARRRRRGGGGBBBBB
 
@@ -158,22 +161,27 @@ void set_audio_sample(int16_t left, int16_t right)
 void set_input_poll(void)
 {
     int ch = getch();
+    if (ch == ERR)
+    {
+        return;
+    }
+
     if (ch == 'j')
         g.joypad[RETRO_DEVICE_ID_JOYPAD_LEFT] = 1;
     else
         g.joypad[RETRO_DEVICE_ID_JOYPAD_LEFT] = 0;
 
-    if (ch == KEY_RIGHT)
+    if (ch == 'l')
         g.joypad[RETRO_DEVICE_ID_JOYPAD_RIGHT] = 1;
     else
         g.joypad[RETRO_DEVICE_ID_JOYPAD_RIGHT] = 0;
 
-    if (ch == KEY_UP)
+    if (ch == 'i')
         g.joypad[RETRO_DEVICE_ID_JOYPAD_UP] = 1;
     else
         g.joypad[RETRO_DEVICE_ID_JOYPAD_UP] = 0;
 
-    if (ch == KEY_DOWN)
+    if (ch == 'k')
         g.joypad[RETRO_DEVICE_ID_JOYPAD_DOWN] = 1;
     else
         g.joypad[RETRO_DEVICE_ID_JOYPAD_DOWN] = 0;
@@ -184,9 +192,9 @@ void set_input_poll(void)
         g.joypad[RETRO_DEVICE_ID_JOYPAD_B] = 0;
 
     if (ch == 'x')
-        g.joypad[RETRO_DEVICE_ID_JOYPAD_Y] = 1;
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_A] = 1;
     else
-        g.joypad[RETRO_DEVICE_ID_JOYPAD_Y] = 0;
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_A] = 0;
 
     if (ch == ' ')
         g.joypad[RETRO_DEVICE_ID_JOYPAD_START] = 1;
@@ -208,19 +216,11 @@ int main(int argc, char *argv[])
 {
 
     if (argc != 3)
-    {
-        fprintf(stderr, "usage: %s <corepath> <rompath>\n", argv[0]);
-        shutdown();
-        return 1;
-    }
+        fatal("usage: %s <corepath> <rompath>", argv[0]);
 
     void *handle = dlopen(argv[1], RTLD_LAZY);
     if (!handle)
-    {
-        fprintf(stderr, "failed to load core %s: %s\n", argv[1], dlerror());
-        shutdown();
-        return 1;
-    }
+        fatal("failed to load core %s: %s", argv[1], dlerror());
 
     void (*retro_set_environment)(retro_environment_t);
     void (*retro_set_video_refresh)(retro_video_refresh_t);
@@ -280,10 +280,7 @@ int main(int argc, char *argv[])
 
     FILE *file = fopen(argv[2], "rb");
     if (!file)
-    {
-        fprintf(stderr, "failed to open rom: %s\n", strerror(errno));
-        return 1;
-    }
+        fatal("failed to open rom: %s", strerror(errno));
 
     fseek(file, 0, SEEK_END);
     game.size = ftell(file);
@@ -296,55 +293,33 @@ int main(int argc, char *argv[])
     {
         game.data = malloc(game.size);
         if (!game.data)
-        {
-            fprintf(stderr, "failed to allocate %ld bytes: %s\n", game.size, strerror(errno));
-            shutdown();
-            return 1;
-        }
+            fatal("failed to allocate %ld bytes: %s", game.size, strerror(errno));
 
         if (!fread((void *)game.data, game.size, 1, file))
-        {
-            fprintf(stderr, "failed to read game rom: %s\n", strerror(errno));
-            shutdown();
-            return 1;
-        }
+            fatal("failed to read game rom: %s", strerror(errno));
     }
 
     if (!retro_load_game(&game))
-    {
-        fprintf(stderr, "core failed to load game\n");
-        shutdown();
-        return 1;
-    }
+        fatal("core failed to load game");
 
+    // init sound
     struct retro_system_av_info av = {0};
     retro_get_system_av_info(&av);
 
-    // init sound
-
     int err = snd_pcm_open(&g.pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
     if (err < 0)
-    {
-        fprintf(stderr, "failed to open playback device: %s", snd_strerror(err));
-        shutdown();
-        return 1;
-    }
+        fatal("failed to open playback device: %s", snd_strerror(err));
 
     err = snd_pcm_set_params(g.pcm, SND_PCM_FORMAT_S16, SND_PCM_ACCESS_RW_INTERLEAVED, 2, av.timing.sample_rate, 1, 64 * 1000);
     if (err < 0)
-    {
-        fprintf(stderr, "failed to configure playback device: %s", snd_strerror(err));
-        shutdown();
-        return 1;
-    }
+        fatal("failed to configure playback device: %s", snd_strerror(err));
+
+    // init window
 
     initscr();
     cbreak();
-
-    timeout(0);
-    // g.win = newwin(av.geometry.base_height, av.geometry.base_width, 0, 0);
-    // box(g.win, 0, 0);
-    // refresh();
+    keypad(stdscr, TRUE);
+    timeout(5);
 
     for (;;)
     {
