@@ -1,4 +1,4 @@
-// #include <ncurses.h>
+#include <ncurses.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <dlfcn.h>
@@ -7,15 +7,56 @@
 #include "libretro.h"
 #include <alsa/asoundlib.h>
 
-#define load_sym(H, N)                                                  \
-    (*(void **)&N) = dlsym(H, #N);                                      \
-    if (!N)                                                             \
-    {                                                                   \
-        fprintf(stderr, "failed to load symbol '#N': %s\n", dlerror()); \
-        return 1;                                                       \
+#define fatal(msg, ...)                  \
+    fprintf(stderr, msg, ##__VA_ARGS__); \
+    shutdown();                          \
+    exit(1);
+
+#define load_sym(H, N)                                        \
+    (*(void **)&N) = dlsym(H, #N);                            \
+    if (!N)                                                   \
+    {                                                         \
+        fatal("failed to load symbol '#N': %s\n", dlerror()); \
     }
 
-snd_pcm_t *pcm = NULL;
+// #define DEBUG 1
+#ifdef DEBUG
+#define initscr() 0
+#define endwin() 0
+#define mvprintw(a, b, c) 0
+#define timeout(x) 0
+#define getch() 0
+#define refresh() 0
+#define attron(x) 0
+#define attroff(x) 0
+#define COLOR_RED 0
+#define COLOR_GREEN 0
+#define COLOR_BLUE 0
+#define KEY_ENTER 1
+#endif
+
+struct g_app
+{
+    // WINDOW *win;
+    snd_pcm_t *pcm;
+    unsigned joypad[RETRO_DEVICE_ID_JOYPAD_L3 + 1];
+    unsigned enter;
+} g = {0};
+
+void shutdown()
+{
+    if (g.pcm)
+    {
+        snd_pcm_close(g.pcm);
+    }
+
+    // if (g.win)
+    // {
+    //     delwin(g.win);
+    // }
+
+    endwin();
+}
 
 bool set_environment(unsigned cmd, void *data)
 {
@@ -29,31 +70,80 @@ void set_video_refresh(const void *data, unsigned width, unsigned height, size_t
         return;
     }
 
-    for (int x = 0; x < height; x++)
-    {
-        for (int y = 0; y < width; y++)
-        {
-            printf("%d", ((unsigned **)data)[x][y]);
-        }
-    }
-}
+    uint16_t *pixels = (uint16_t *)data;
 
-void set_audio_sample(int16_t left, int16_t right)
-{
+    start_color();
+    init_pair(COLOR_RED, COLOR_RED, COLOR_RED);
+    init_pair(COLOR_GREEN, COLOR_GREEN, COLOR_GREEN);
+    init_pair(COLOR_BLUE, COLOR_BLUE, COLOR_BLUE);
+
+    int skip = 1;
+    for (int i = 0; i < width * height; i += skip)
+    {
+        unsigned w = (i % width) / skip;
+        unsigned h = (i / width) / skip;
+
+        // ARRRRRGGGGBBBBB
+
+        uint16_t a = (pixels[i] >> 14) & 1;
+        // tranparent
+        if (!a)
+        {
+            // wmove(g.win, h, w);
+            // wprintw(g.win, " ");
+            mvprintw(h, w, " ");
+            continue;
+        }
+
+        uint16_t red = (pixels[i] >> 9) & 0x1F;
+        uint16_t green = (pixels[i] >> 6) & 0x1F;
+        uint16_t blue = pixels[i] & 0x1F;
+
+        unsigned color = 0;
+        if (red > green && red > blue)
+        {
+            color = COLOR_RED;
+        }
+        if (green > red && green > blue)
+        {
+            color = COLOR_GREEN;
+        }
+        if (blue > red && blue > green)
+        {
+            color = COLOR_BLUE;
+        }
+
+        if (!color)
+        {
+            // wmove(g.win, h, w);
+            // wprintw(g.win, " ");
+            mvprintw(h, w, " ");
+            continue;
+        }
+
+        attron(COLOR_PAIR(color));
+        // wmove(g.win, h, w);
+        // wprintw(g.win, " ");
+        mvprintw(h, w, " ");
+        attroff(COLOR_PAIR(color));
+    }
+
+    // wrefresh(g.win);
+    refresh();
 }
 
 size_t set_audio_sample_batch(const int16_t *data, size_t frames)
 {
-    if (!pcm)
+    if (!g.pcm)
     {
         return 0;
     }
 
-    int n = snd_pcm_writei(pcm, data, frames);
+    int n = snd_pcm_writei(g.pcm, data, frames);
     if (n < 0)
     {
-        snd_pcm_recover(pcm, n, 0);
-    return 0;
+        snd_pcm_recover(g.pcm, n, 0);
+        return 0;
     }
 
     return n;
@@ -67,18 +157,60 @@ void set_audio_sample(int16_t left, int16_t right)
 
 void set_input_poll(void)
 {
+    int ch = getch();
+    if (ch == 'j')
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_LEFT] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_LEFT] = 0;
+
+    if (ch == KEY_RIGHT)
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_RIGHT] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_RIGHT] = 0;
+
+    if (ch == KEY_UP)
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_UP] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_UP] = 0;
+
+    if (ch == KEY_DOWN)
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_DOWN] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_DOWN] = 0;
+
+    if (ch == 'z')
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_B] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_B] = 0;
+
+    if (ch == 'x')
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_Y] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_Y] = 0;
+
+    if (ch == ' ')
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_START] = 1;
+    else
+        g.joypad[RETRO_DEVICE_ID_JOYPAD_START] = 0;
 }
 
 int16_t set_input_state(unsigned port, unsigned device, unsigned index, unsigned id)
 {
-    return 0;
+    if (port || index || device != RETRO_DEVICE_JOYPAD)
+    {
+        return 0;
+    }
+
+    return g.joypad[id];
 }
 
 int main(int argc, char *argv[])
 {
+
     if (argc != 3)
     {
         fprintf(stderr, "usage: %s <corepath> <rompath>\n", argv[0]);
+        shutdown();
         return 1;
     }
 
@@ -86,6 +218,7 @@ int main(int argc, char *argv[])
     if (!handle)
     {
         fprintf(stderr, "failed to load core %s: %s\n", argv[1], dlerror());
+        shutdown();
         return 1;
     }
 
@@ -165,12 +298,14 @@ int main(int argc, char *argv[])
         if (!game.data)
         {
             fprintf(stderr, "failed to allocate %ld bytes: %s\n", game.size, strerror(errno));
+            shutdown();
             return 1;
         }
 
         if (!fread((void *)game.data, game.size, 1, file))
         {
             fprintf(stderr, "failed to read game rom: %s\n", strerror(errno));
+            shutdown();
             return 1;
         }
     }
@@ -178,6 +313,7 @@ int main(int argc, char *argv[])
     if (!retro_load_game(&game))
     {
         fprintf(stderr, "core failed to load game\n");
+        shutdown();
         return 1;
     }
 
@@ -186,30 +322,34 @@ int main(int argc, char *argv[])
 
     // init sound
 
-    int err = snd_pcm_open(&pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
+    int err = snd_pcm_open(&g.pcm, "default", SND_PCM_STREAM_PLAYBACK, 0);
     if (err < 0)
     {
         fprintf(stderr, "failed to open playback device: %s", snd_strerror(err));
+        shutdown();
         return 1;
     }
 
-    err = snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16, SND_PCM_ACCESS_RW_INTERLEAVED, 2, av.timing.sample_rate, 1, 64 * 1000);
+    err = snd_pcm_set_params(g.pcm, SND_PCM_FORMAT_S16, SND_PCM_ACCESS_RW_INTERLEAVED, 2, av.timing.sample_rate, 1, 64 * 1000);
     if (err < 0)
     {
         fprintf(stderr, "failed to configure playback device: %s", snd_strerror(err));
+        shutdown();
         return 1;
     }
+
+    initscr();
+    cbreak();
+
+    timeout(0);
+    // g.win = newwin(av.geometry.base_height, av.geometry.base_width, 0, 0);
+    // box(g.win, 0, 0);
+    // refresh();
 
     for (;;)
     {
         retro_run();
     }
 
-    // configure video and init audio
-
-    // initscr();
-    // printw("negoou");
-    // refresh();
-    // getch();
-    // endwin();
+    shutdown();
 }
