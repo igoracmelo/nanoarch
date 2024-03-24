@@ -7,18 +7,22 @@
 #include "libretro.h"
 #include <alsa/asoundlib.h>
 
-#define fatal(msg, ...)                  \
+#define fatal(msg, ...)                      \
+    {                                        \
     fprintf(stderr, "FATAL: ");          \
     fprintf(stderr, msg, ##__VA_ARGS__); \
     fprintf(stderr, "\n");               \
     shutdown();                          \
-    exit(1);
+        exit(1);                             \
+    }
 
-#define load_sym(H, N)                                      \
+#define load_sym(H, N)                                          \
+    {                                                           \
     (*(void **)&N) = dlsym(H, #N);                          \
     if (!N)                                                 \
     {                                                       \
         fatal("failed to load symbol '#N': %s", dlerror()); \
+        }                                                       \
     }
 
 // #define DEBUG 1
@@ -315,16 +319,14 @@ int main(int argc, char *argv[])
         fatal("failed to configure playback device: %s", snd_strerror(err));
 
     // init window
-
     initscr();
     cbreak();
     keypad(stdscr, TRUE);
     timeout(5);
 
+    // main loop
     for (;;)
-    {
         retro_run();
-    }
 
     shutdown();
 }
