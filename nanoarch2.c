@@ -94,6 +94,11 @@ void cb_video_refresh(const void *data, unsigned width, unsigned height, size_t 
 
     uint16_t *pixels = (uint16_t *)data;
 
+    start_color();
+    init_pair(COLOR_RED, COLOR_RED, COLOR_RED);
+    init_pair(COLOR_GREEN, COLOR_GREEN, COLOR_GREEN);
+    init_pair(COLOR_BLUE, COLOR_BLUE, COLOR_BLUE);
+
     int step = 2;
     int skip = 0;
     for (int i = 0; i < width * height; i += step)
@@ -308,10 +313,6 @@ int main(int argc, char *argv[])
         fatal("failed to configure playback device: %s", snd_strerror(err));
 
     // init window
-    start_color();
-    init_pair(COLOR_RED, COLOR_RED, COLOR_RED);
-    init_pair(COLOR_GREEN, COLOR_GREEN, COLOR_GREEN);
-    init_pair(COLOR_BLUE, COLOR_BLUE, COLOR_BLUE);
     initscr();
     cbreak();
     keypad(stdscr, TRUE);
