@@ -8,6 +8,8 @@
 #include <alsa/asoundlib.h>
 #include <signal.h>
 
+#define LOG_LEVEL RETRO_LOG_INFO
+
 #define fatal(msg, ...)                      \
     {                                        \
         fprintf(stderr, "FATAL: ");          \
@@ -75,11 +77,69 @@ void shutdown(int status)
     exit(status);
 }
 
+void core_log(enum retro_log_level level, const char *fmt, ...)
+{
+    if (level < LOG_LEVEL)
+        return;
+
+    char buf[1024] = {0};
+    char *levels[] = {"DEBUG", "INFO", "WARN", "ERROR"};
+    va_list va;
+    va_start(va, fmt);
+    vsnprintf(buf, sizeof(buf), fmt, va);
+    va_end(va);
+
+    fprintf(stderr, "%s: %s", levels[level], buf);
+    fflush(stderr);
+}
+
 // TODO
 bool cb_environment(unsigned cmd, void *data)
 {
-    return 0;
+    switch (cmd)
+    {
+    case RETRO_ENVIRONMENT_GET_LOG_INTERFACE:
+        struct retro_log_callback *cb = (struct retro_log_callback *)data;
+        cb->log = core_log;
+        return true;
+
+    // disallow setting pixel format
+    case RETRO_ENVIRONMENT_SET_PIXEL_FORMAT:
+        return false;
+
+    case RETRO_ENVIRONMENT_GET_CAN_DUPE:
+        *(bool *)data = true;
+        return true;
+
+    case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
+    case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
+        *(char **)data = ".";
+
+    default:
+        // fprintf(stderr, "unhandled environment: #%u\n", cmd);
+        return false;
+    }
 }
+
+struct color
+{
+    short bits;
+    short id;
+};
+
+struct color colors[] = {
+    {0b000, COLOR_BLACK},
+    {0b100, COLOR_RED},
+    {0b010, COLOR_GREEN},
+    {0b001, COLOR_BLUE},
+
+    {0b110, COLOR_YELLOW},
+    {0b101, COLOR_MAGENTA},
+    {0b011, COLOR_CYAN},
+
+    {0b111, COLOR_WHITE},
+    {-1, -1},
+};
 
 // Currently only supports 0RGB155 pixel format, where each pixel contains 16 bit of information:
 // ARRRRRGGGGGBBBBB
@@ -95,11 +155,14 @@ void cb_video_refresh(const void *data, unsigned width, unsigned height, size_t 
     uint16_t *pixels = (uint16_t *)data;
 
     start_color();
-    init_pair(COLOR_RED, COLOR_RED, COLOR_RED);
-    init_pair(COLOR_GREEN, COLOR_GREEN, COLOR_GREEN);
-    init_pair(COLOR_BLUE, COLOR_BLUE, COLOR_BLUE);
 
-    int step = 2;
+    // init terminal colors from COLOR_BLACK to COLOR_WHITE
+    for (int i = 0; i <= 7; i++)
+    {
+        init_pair(i, i, i);
+    }
+
+    int step = 1;
     int skip = 0;
     for (int i = 0; i < width * height; i += step)
     {
@@ -119,25 +182,37 @@ void cb_video_refresh(const void *data, unsigned width, unsigned height, size_t 
         uint16_t green = (pixels[i] >> 6) & 0x1F;
         uint16_t blue = pixels[i] & 0x1F;
 
-        unsigned color = 0;
-        if (red > green && red > blue)
-            color = COLOR_RED;
-        if (green > red && green > blue)
-            color = COLOR_GREEN;
-        if (blue > red && blue > green)
-            color = COLOR_BLUE;
+        // divide by 16 so values in range [0, 15] become 0 and values in range [16, 31] become 1
+        short bits = (red / 16 % 2) << 2;
+        bits |= (green / 16 % 2) << 1;
+        bits |= blue / 16 % 2;
+
+        struct color clr = {-1, -1};
+        for (int i = 0; colors[i].bits >= 0; i++)
+        {
+            if (colors[i].bits == bits)
+            {
+                clr = colors[i];
+                break;
+            }
+        }
 
         // color not identified, draw transparent block
-        if (!color)
+        if (clr.id < 0)
         {
             mvprintw(h, w, " ");
             continue;
         }
 
+        // if (clr.id == COLOR_GREEN)
+        //     fprintf(stderr, "green!\n");
+        // if (clr.id == COLOR_MAGENTA)
+        //     fprintf(stderr, "magenta!\n");
+
         // draw pixel
-        attron(COLOR_PAIR(color));
+        attron(COLOR_PAIR(clr.id));
         mvprintw(h, w, " ");
-        attroff(COLOR_PAIR(color));
+        attroff(COLOR_PAIR(clr.id));
     }
 
     refresh();
