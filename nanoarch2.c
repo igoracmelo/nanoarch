@@ -81,10 +81,10 @@ bool cb_environment(unsigned cmd, void *data)
     return 0;
 }
 
-// Currently only supports 0RGB155 pixel format, where each pixels contain 16 bit of information:
+// Currently only supports 0RGB155 pixel format, where each pixel contains 16 bit of information:
 // ARRRRRGGGGGBBBBB
 // A (alpha):  0 = transparent, 1 = opaque
-// R (red): 5 bit unsigned number, representing the intensity of read (0 = no red, 31 = max red)
+// R (red): 5 bit unsigned number, representing the intensity of red (0 = no red, 31 = max red)
 // G (green): same idea as R
 // B (blue): same idea as R
 void cb_video_refresh(const void *data, unsigned width, unsigned height, size_t pitch)
